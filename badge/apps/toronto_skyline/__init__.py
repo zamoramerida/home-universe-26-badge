@@ -55,27 +55,35 @@ BUILDINGS = (
 
 view_index = 0
 postcard = True
+tilt_reference = None
+parallax_x = 0.0
+parallax_y = 0.0
 
 
-def draw_buildings(view, ground):
+def draw_buildings(view, ground, tilt_x, tilt_y):
     width = screen.width
+    far_x = int(round(tilt_x * 0.4 * width / 160))
+    far_y = int(round(tilt_y * 0.3 * width / 160))
+    near_x = int(round(tilt_x * 0.8 * width / 160))
+    near_y = int(round(tilt_y * 0.6 * width / 160))
+
     screen.pen = color.rgb(*view["far"])
     for x, building_width, height in BUILDINGS:
-        screen.rectangle(x * width // 160, ground - height,
+        screen.rectangle(x * width // 160 + far_x, ground - height + far_y,
                          building_width * width // 160, height)
 
     screen.pen = color.rgb(*view["city"])
     for x, building_width, height in BUILDINGS:
-        left = x * width // 160
+        left = x * width // 160 + near_x
         scaled_width = building_width * width // 160
-        top = ground - height
+        top = ground - height + near_y
         screen.rectangle(left + 2, top + 3, max(2, scaled_width - 4), height - 3)
 
     screen.pen = color.rgb(*view["windows"])
     for x, building_width, height in BUILDINGS:
-        left = x * width // 160
+        left = x * width // 160 + near_x
         scaled_width = building_width * width // 160
-        top = ground - height
+        top = ground - height + near_y
         for row in range(2, max(3, height - 5), 7):
             for column in range(3, max(4, scaled_width - 3), 5):
                 screen.rectangle(left + column, top + row, 2, 2)
@@ -101,10 +109,10 @@ def draw_cn_tower(view, ground):
         screen.rectangle(x, ground - 72, 2, 2)
 
 
-def draw_sun_or_moon(view, ground):
+def draw_sun_or_moon(view, tilt_x, tilt_y):
     width = screen.width
-    x = width * 102 // 160
-    y = 31
+    x = width * 102 // 160 + int(round(tilt_x * 0.2 * width / 160))
+    y = 31 + int(round(tilt_y * 0.2 * width / 160))
     screen.pen = color.rgb(*view["glow"])
     screen.circle(vec2(x, y), 7)
     if view["name"] == "NIGHT":
@@ -117,17 +125,45 @@ def draw_sun_or_moon(view, ground):
             screen.rectangle(sx * width // 160, sy, 2, 2)
 
 
-def draw_water(view, ground):
+def draw_water(view, ground, tilt_x, tilt_y):
     width = screen.width
     height = screen.height
+    water_y = int(round(tilt_y * 1.2 * width / 160))
     screen.pen = color.rgb(*view["water"])
-    screen.rectangle(0, ground, width, height - ground)
+    screen.rectangle(0, ground + water_y, width, height - ground - water_y)
 
     screen.pen = color.rgb(*view["water_line"])
     for row in (ground + 5, ground + 11, ground + 18):
-        y = min(row, height - 17)
-        for x in range((row * 3) % 13, width, 23):
+        y = min(row + water_y, height - 17)
+        water_x = int(round(tilt_x * 1.2 * width / 160))
+        for x in range((row * 3) % 13 + water_x, width, 23):
             screen.rectangle(x, y, 7 + (x % 8), 1)
+
+
+def update_parallax():
+    global tilt_reference, parallax_x, parallax_y
+
+    ax, ay, az, _gx, _gy, _gz = badge.imu()
+    magnitude = (ax * ax + ay * ay + az * az) ** 0.5
+
+    if magnitude:
+        normalized = (ax / magnitude, ay / magnitude)
+        if tilt_reference is None:
+            tilt_reference = normalized
+        target_x = (normalized[0] - tilt_reference[0]) * 12
+        target_y = (normalized[1] - tilt_reference[1]) * 12
+        if badge.upside_down():
+            target_x = -target_x
+            target_y = -target_y
+        target_x = max(-5, min(5, target_x))
+        target_y = max(-5, min(5, target_y))
+    else:
+        target_x = 0
+        target_y = 0
+
+    blend = min(1, max(0, badge.ticks_delta) / 160)
+    parallax_x += (target_x - parallax_x) * blend
+    parallax_y += (target_y - parallax_y) * blend
 
 
 def update():
@@ -142,15 +178,16 @@ def update():
 
     width = screen.width
     height = screen.height
+    update_parallax()
     view = VIEWS[view_index]
     ground = height - 31
 
     screen.pen = color.rgb(*view["sky"])
     screen.rectangle(0, 0, width, height)
-    draw_sun_or_moon(view, ground)
-    draw_buildings(view, ground)
+    draw_sun_or_moon(view, parallax_x, parallax_y)
+    draw_buildings(view, ground, parallax_x, parallax_y)
     draw_cn_tower(view, ground)
-    draw_water(view, ground)
+    draw_water(view, ground, parallax_x, parallax_y)
 
     screen.pen = color.rgb(12, 22, 38)
     screen.rectangle(0, height - 18, width, 18)
@@ -160,7 +197,7 @@ def update():
         screen.text("THE 6IX", 4, 17)
 
     screen.pen = color.rgb(255, 244, 224)
-    screen.text("L/R: SKY   SEL: CARD", 4, height - 16)
+    screen.text("TILT L/R SKY SEL CARD", 4, height - 16)
 
 
 run(update)
